@@ -1,0 +1,16 @@
+# secrets / local config
+.env
+.env.local
+
+# runtime state & caches
+data/
+*.log
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
