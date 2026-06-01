@@ -13,6 +13,7 @@ from typing import Sequence
 import requests
 
 from . import gpu
+from .config import Config
 from .models import Deal
 
 log = logging.getLogger("bestbuy_hunter.discord")
@@ -23,9 +24,14 @@ EMBEDS_PER_MESSAGE = 10
 _GREEN = 0x2ECC71
 _YELLOW = 0xF1C40F
 _BLUE = 0x3498DB
+_RED = 0xE74C3C   # price-error / glitch
+
+_RETAILER_LABEL = {"bestbuy": "Best Buy", "ebay": "eBay", "amazon": "Amazon"}
 
 
 def _color_for(deal: Deal) -> int:
+    if deal.is_glitch:
+        return _RED
     if deal.gpu_tier > 0 or deal.score >= 120:
         return _GREEN
     if deal.score >= 60:
@@ -33,27 +39,44 @@ def _color_for(deal: Deal) -> int:
     return _BLUE
 
 
+def _condition_label(deal: Deal) -> str:
+    c = deal.condition
+    if c == "new":
+        return "New"
+    if c in ("used", "refurbished"):
+        return c.title()
+    if c == "open-box":
+        return "Open-Box"
+    # Best Buy open-box tiers (excellent/certified/good/fair)
+    return f"Open-Box · {c.title()}"
+
+
 def _embed(deal: Deal) -> dict:
-    cond = "New" if deal.condition == "new" else f"Open-Box · {deal.condition.title()}"
+    retailer = _RETAILER_LABEL.get(deal.retailer, deal.retailer.title())
     fields = [
         {"name": "Price", "value": f"${deal.price:,.2f}", "inline": True},
         {"name": "Regular", "value": f"${deal.regular:,.2f}" if deal.regular else "—", "inline": True},
         {"name": "Discount", "value": f"{deal.pct_off:.0f}% (${deal.dollar_off:,.0f})" if deal.pct_off else "—", "inline": True},
-        {"name": "Condition", "value": cond, "inline": True},
+        {"name": "Condition", "value": _condition_label(deal), "inline": True},
+        {"name": "Retailer", "value": retailer, "inline": True},
         {"name": "Category", "value": deal.category_name or deal.bucket, "inline": True},
     ]
     if deal.gpu_tier:
         fields.append({"name": "GPU", "value": gpu.label(deal.gpu_tier), "inline": True})
     if deal.rating is not None and deal.reviews:
         fields.append({"name": "Rating", "value": f"{deal.rating:.1f}★ ({deal.reviews})", "inline": True})
+    if deal.seller:
+        fields.append({"name": "Seller", "value": deal.seller[:40], "inline": True})
 
     desc = ", ".join(deal.reasons) if deal.reasons else ""
+    title = ("⚡ " + deal.name) if deal.is_glitch else deal.name
+    footer = f"{retailer} {deal.product_id} · score {deal.score:.0f}"
     embed = {
-        "title": deal.name[:250],
+        "title": title[:250],
         "url": deal.url or None,
         "color": _color_for(deal),
         "fields": fields,
-        "footer": {"text": f"SKU {deal.sku} · score {deal.score:.0f}"},
+        "footer": {"text": footer},
     }
     if desc:
         embed["description"] = f"**Why:** {desc}"
@@ -62,12 +85,26 @@ def _embed(deal: Deal) -> dict:
     return embed
 
 
+def send_glitches(cfg: Config, deals: Sequence[Deal]) -> bool:
+    """Send price-error deals to the dedicated glitch lane (with optional ping).
+
+    Falls back to the main webhook if no separate glitch webhook is configured,
+    so glitches still get through (just in the main channel).
+    """
+    if not deals:
+        return True
+    webhook = cfg.discord_glitch_webhook_url or cfg.discord_webhook_url
+    ping = (cfg.glitch_ping + " ") if cfg.glitch_ping else ""
+    header = f"{ping}🚨 **{len(deals)} POSSIBLE PRICE ERROR(S)** — act fast, these die quickly!"
+    return send(webhook, deals, header=header)
+
+
 def send(webhook_url: str, deals: Sequence[Deal], header: str | None = None) -> bool:
     """Send deals to Discord. Returns True if anything was sent (or nothing to send)."""
     if not deals:
         return True
     if not webhook_url:
-        log.info("No DISCORD_WEBHOOK_URL set; skipping send of %d deal(s).", len(deals))
+        log.info("No Discord webhook set; skipping send of %d deal(s).", len(deals))
         return False
 
     ok = True

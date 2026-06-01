@@ -100,11 +100,32 @@ class Thresholds:
 
 
 @dataclass
+class GlitchConfig:
+    """Tuning for the price-error / glitch detector (see glitch.py)."""
+
+    enabled: bool = True
+    # Fraction of the historical low that a price must fall to/below to look like
+    # an error (e.g. 0.60 => 40%+ under the lowest price we've ever recorded).
+    floor_ratio: float = 0.60
+    # Fraction of the rolling median that flags an anomaly (0.50 => half median).
+    median_ratio: float = 0.50
+    # Fraction of MSRP/regular that flags a likely error even with no history
+    # (0.40 => 60%+ off list price).
+    msrp_ratio: float = 0.40
+    # Minimum recorded history points before floor/median signals are trusted.
+    min_history: int = 4
+    # Minimum confidence (0-1) required to fire a glitch alert.
+    min_confidence: float = 0.6
+
+
+@dataclass
 class Config:
     """Top-level runtime configuration."""
 
     api_key: str = ""
     discord_webhook_url: str = ""
+    discord_glitch_webhook_url: str = ""   # optional separate lane for price errors
+    glitch_ping: str = ""                  # e.g. "@here" or "<@&ROLE_ID>" for glitch alerts
     poll_interval_minutes: int = 12
     price_cap: Optional[float] = None
     min_price: float = 15.0
@@ -112,6 +133,13 @@ class Config:
     max_alerts_per_cycle: int = 15
     watch_skus: list[int] = field(default_factory=list)
     thresholds: Thresholds = field(default_factory=Thresholds)
+    glitch: GlitchConfig = field(default_factory=GlitchConfig)
+    # source toggles + credentials
+    bestbuy_enabled: bool = True
+    ebay_enabled: bool = False
+    ebay_client_id: str = ""
+    ebay_client_secret: str = ""
+    ebay_marketplace: str = "EBAY_US"
     data_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parent.parent / "data")
 
     # ------------------------------------------------------------------ #
@@ -133,6 +161,12 @@ class Config:
             except ValueError:
                 return default
 
+        def _b(name: str, default: bool) -> bool:
+            raw = os.getenv(name, "").strip().lower()
+            if raw == "":
+                return default
+            return raw in ("1", "true", "yes", "on", "y")
+
         watch_raw = os.getenv("WATCH_SKUS", "").strip()
         watch_skus: list[int] = []
         for chunk in watch_raw.replace(";", ",").split(","):
@@ -148,9 +182,23 @@ class Config:
             core_dollar_floor=_f("CORE_DOLLAR_FLOOR", 75.0),
         )
 
+        glitch = GlitchConfig(
+            enabled=_b("GLITCH_ENABLED", True),
+            floor_ratio=_f("GLITCH_FLOOR_RATIO", 0.60),
+            median_ratio=_f("GLITCH_MEDIAN_RATIO", 0.50),
+            msrp_ratio=_f("GLITCH_MSRP_RATIO", 0.40),
+            min_history=_i("GLITCH_MIN_HISTORY", 4),
+            min_confidence=_f("GLITCH_MIN_CONFIDENCE", 0.6),
+        )
+
+        ebay_id = os.getenv("EBAY_CLIENT_ID", "").strip()
+        ebay_secret = os.getenv("EBAY_CLIENT_SECRET", "").strip()
+
         cfg = cls(
             api_key=os.getenv("BBY_API_KEY", "").strip(),
             discord_webhook_url=os.getenv("DISCORD_WEBHOOK_URL", "").strip(),
+            discord_glitch_webhook_url=os.getenv("DISCORD_GLITCH_WEBHOOK_URL", "").strip(),
+            glitch_ping=os.getenv("GLITCH_PING", "").strip(),
             poll_interval_minutes=_i("POLL_INTERVAL_MINUTES", 12),
             price_cap=_f("PRICE_CAP", None),
             min_price=_f("MIN_PRICE", 15.0),
@@ -158,15 +206,25 @@ class Config:
             max_alerts_per_cycle=_i("MAX_ALERTS_PER_CYCLE", 15),
             watch_skus=watch_skus,
             thresholds=thresholds,
+            glitch=glitch,
+            bestbuy_enabled=_b("BESTBUY_ENABLED", True),
+            # eBay turns on automatically when credentials are present (or via flag).
+            ebay_enabled=_b("EBAY_ENABLED", bool(ebay_id and ebay_secret)),
+            ebay_client_id=ebay_id,
+            ebay_client_secret=ebay_secret,
+            ebay_marketplace=os.getenv("EBAY_MARKETPLACE", "EBAY_US").strip() or "EBAY_US",
         )
         cfg.data_dir.mkdir(parents=True, exist_ok=True)
         return cfg
 
     # ------------------------------------------------------------------ #
-    def require_api_key(self) -> str:
-        if not self.api_key:
+    def validate_sources(self) -> None:
+        """Ensure at least one usable source is configured; raise otherwise."""
+        bestbuy_ok = self.bestbuy_enabled and bool(self.api_key)
+        ebay_ok = self.ebay_enabled and bool(self.ebay_client_id and self.ebay_client_secret)
+        if not (bestbuy_ok or ebay_ok):
             raise RuntimeError(
-                "BBY_API_KEY is not set. Get a free key at https://developer.bestbuy.com/ "
-                "and put it in your .env file."
+                "No source is configured. Set BBY_API_KEY (Best Buy, "
+                "https://developer.bestbuy.com/) and/or EBAY_CLIENT_ID + "
+                "EBAY_CLIENT_SECRET (eBay, https://developer.ebay.com/) in your .env."
             )
-        return self.api_key

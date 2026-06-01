@@ -16,8 +16,9 @@ def watch(hunter: Hunter, cfg: Config) -> None:
     backoff = 60
     while True:
         try:
-            new_deals = hunter.run_once(dry_run=False)
-            log.info("Cycle complete: alerted on %d new deal(s).", len(new_deals))
+            result = hunter.run_once(dry_run=False)
+            log.info("Cycle complete: %d glitch(es) + %d new deal(s) alerted.",
+                     len(result.glitches), len(result.deals))
             backoff = 60  # reset after a healthy cycle
             time.sleep(interval)
         except KeyboardInterrupt:

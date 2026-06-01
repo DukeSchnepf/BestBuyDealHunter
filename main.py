@@ -14,28 +14,27 @@ import argparse
 import logging
 import sys
 
-from bestbuy_hunter.client import BestBuyClient
 from bestbuy_hunter.config import Config
 from bestbuy_hunter.hunter import Hunter
 from bestbuy_hunter import gpu
 from bestbuy_hunter.watcher import watch
 
 
-def _print_table(deals) -> None:
+def _print_table(deals, title: str) -> None:
     if not deals:
-        print("\nNo deals passed curation this scan.\n")
         return
-    print(f"\n=== {len(deals)} hand-picked deals (best first) ===\n")
+    print(f"\n=== {title} ({len(deals)}) — best first ===\n")
     for i, d in enumerate(deals, 1):
-        cond = "NEW" if d.condition == "new" else f"OB/{d.condition}"
+        cond = "NEW" if d.condition == "new" else d.condition.upper()[:11]
         gpu_lbl = f" [{gpu.label(d.gpu_tier)}]" if d.gpu_tier else ""
+        flag = "⚡" if d.is_glitch else " "
         why = f"  ({', '.join(d.reasons)})" if d.reasons else ""
         print(
-            f"{i:>2}. [{d.score:6.1f}] {cond:>12} | ${d.price:>9,.2f} "
-            f"({d.pct_off:>4.0f}% off ${d.dollar_off:>6,.0f}) | {d.name[:70]}{gpu_lbl}{why}"
+            f"{flag}{i:>2}. [{d.score:6.1f}] {d.retailer:<7} {cond:>11} | ${d.price:>9,.2f} "
+            f"({d.pct_off:>4.0f}% off ${d.dollar_off:>6,.0f}) | {d.name[:60]}{gpu_lbl}{why}"
         )
         if d.url:
-            print(f"      {d.url}")
+            print(f"        {d.url}")
     print()
 
 
@@ -56,23 +55,24 @@ def main(argv: list[str] | None = None) -> int:
 
     cfg = Config.from_env()
     try:
-        cfg.require_api_key()
+        cfg.validate_sources()
     except RuntimeError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 
-    client = BestBuyClient(cfg.api_key)
-    hunter = Hunter(cfg, client)
+    hunter = Hunter(cfg)
+    logging.getLogger(__name__).info(
+        "Sources enabled: %s", ", ".join(s.name for s in hunter.sources) or "none"
+    )
 
-    if args.dry_run:
-        deals = hunter.run_once(dry_run=True)
-        _print_table(deals)
-        return 0
-
-    if args.once:
-        deals = hunter.run_once(dry_run=False)
-        _print_table(deals)
-        print(f"Alerted on {len(deals)} new deal(s).")
+    if args.dry_run or args.once:
+        result = hunter.run_once(dry_run=args.dry_run)
+        _print_table(result.glitches, "⚡ POSSIBLE PRICE ERRORS")
+        _print_table(result.deals, "Hand-picked deals")
+        if not result.deals and not result.glitches:
+            print("\nNo new deals passed curation this scan.\n")
+        if args.once:
+            print(f"Alerted on {len(result.glitches)} glitch(es) + {len(result.deals)} deal(s).")
         return 0
 
     # default: watch

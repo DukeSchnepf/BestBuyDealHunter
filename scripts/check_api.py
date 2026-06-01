@@ -22,10 +22,8 @@ from bestbuy_hunter.config import Config  # noqa: E402
 
 def main() -> int:
     cfg = Config.from_env()
-    try:
-        cfg.require_api_key()
-    except RuntimeError as exc:
-        print(f"ERROR: {exc}")
+    if not cfg.api_key:
+        print("ERROR: BBY_API_KEY is not set. Get a free key at https://developer.bestbuy.com/")
         return 2
 
     client = BestBuyClient(cfg.api_key)
@@ -66,7 +64,25 @@ def main() -> int:
     if not results:
         print("  (no open-box laptops returned right now)")
 
-    print("\nAPI looks good. ✅")
+    print("\nBest Buy API looks good. ✅")
+
+    # Optional: eBay connectivity check if credentials are present.
+    if cfg.ebay_client_id and cfg.ebay_client_secret:
+        print("\nChecking eBay Browse API...")
+        from bestbuy_hunter.sources.ebay import EbaySource  # noqa: E402
+        ebay = EbaySource(cfg)
+        try:
+            items = ebay._search("RTX 5070 laptop", limit=3)
+            print(f"  eBay token OK; sample results for 'RTX 5070 laptop': {len(items)}")
+            for it in items[:3]:
+                price = (it.get("price") or {}).get("value")
+                print(f"    - ${price:<10} {it.get('title','')[:60]}  [{it.get('condition')}]")
+            print("eBay API looks good. ✅")
+        except Exception as exc:
+            print(f"  eBay check failed: {exc}")
+    else:
+        print("\n(eBay not configured — set EBAY_CLIENT_ID + EBAY_CLIENT_SECRET to enable.)")
+
     return 0
 
 
