@@ -1,4 +1,4 @@
-"""Orchestrator: scan all sources -> price history -> curate -> glitch -> dedupe -> notify."""
+"""Orchestrator: scan -> price history (SQLite) -> curate -> glitch -> dedupe -> notify."""
 from __future__ import annotations
 
 import logging
@@ -7,9 +7,9 @@ from dataclasses import dataclass
 from . import curate, glitch, notify_discord
 from .config import Config
 from .models import Deal
-from .pricehistory import PriceHistory
 from .sources import Source, build_sources
 from .state import SeenStore
+from .storage import PriceStore
 
 log = logging.getLogger("bestbuy_hunter.hunter")
 
@@ -25,30 +25,34 @@ class Hunter:
         self.cfg = cfg
         self.sources = sources if sources is not None else build_sources(cfg)
         self.seen = SeenStore(cfg.data_dir / "seen.json")
-        self.history = PriceHistory(cfg.data_dir / "price_history.json")
+        self.store = PriceStore(
+            cfg.data_dir / "prices.db",
+            raw_days=cfg.raw_days,
+            retention_days=cfg.retention_days,
+        )
         if not self.sources:
             log.warning("No sources are configured/enabled.")
 
     # ------------------------------------------------------------------ #
-    def scan(self) -> list[Deal]:
-        """Run every source; one failing source never sinks the cycle."""
+    def _gather(self, watchlist: bool) -> list[Deal]:
+        """Run every source's full sweep (or watchlist scan); isolate failures."""
         candidates: list[Deal] = []
         for source in self.sources:
             try:
-                candidates.extend(source.scan())
+                got = source.scan_watchlist() if watchlist else source.scan()
+                candidates.extend(got)
             except Exception as exc:
                 log.error("Source %s failed: %s", source.name, exc)
-        log.info("Collected %d raw candidates across %d source(s).",
-                 len(candidates), len(self.sources))
+        log.info("Collected %d raw candidates (%s) across %d source(s).",
+                 len(candidates), "watchlist" if watchlist else "full", len(self.sources))
         return candidates
 
-    # ------------------------------------------------------------------ #
     def _apply_glitch_detection(self, deals: list[Deal]) -> None:
         """Flag likely pricing errors and boost their score. Mutates deals."""
         if not self.cfg.glitch.enabled:
             return
         for d in deals:
-            stats = self.history.stats(d.history_key, exclude_last=True)
+            stats = self.store.stats(d.history_key, exclude_last=True)
             verdict = glitch.assess(d, stats, self.cfg.glitch)
             if verdict.is_glitch:
                 d.is_glitch = True
@@ -59,13 +63,11 @@ class Hunter:
                 d.score += 200.0 * verdict.confidence
 
     # ------------------------------------------------------------------ #
-    def run_once(self, dry_run: bool = False) -> CycleResult:
-        """One full cycle. Returns the NEW deals + glitches alerted this cycle."""
-        raw = self.scan()
-
-        # Record price history for ALL candidates first so the glitch detector
-        # compares against a baseline that excludes this cycle's sample.
-        self.history.record(raw)
+    def _process(self, raw: list[Deal], dry_run: bool) -> CycleResult:
+        """Shared pipeline for both the full sweep and the watchlist poll."""
+        # Record history first so the glitch detector compares against a baseline
+        # that excludes this cycle's sample.
+        self.store.record(raw)
 
         ranked = curate.curate(raw, self.cfg)
         log.info("%d deals passed curation.", len(ranked))
@@ -84,10 +86,23 @@ class Hunter:
         if not dry_run:
             if new_glitches:
                 notify_discord.send_glitches(self.cfg, new_glitches)
+                for d in new_glitches:
+                    self.store.record_alert(d, "glitch")
             if new_normal:
                 header = f"🛒 **{len(new_normal)} new hand-picked deal(s)**"
                 notify_discord.send(self.cfg.discord_webhook_url, new_normal, header=header)
-            # Remember everything curated so we don't re-alert beyond the cap next cycle.
+                for d in new_normal:
+                    self.store.record_alert(d, "deal")
             self.seen.remember(ranked)
+            self.store.prune_and_rollup()
 
         return CycleResult(deals=new_normal, glitches=new_glitches)
+
+    # ------------------------------------------------------------------ #
+    def run_once(self, dry_run: bool = False) -> CycleResult:
+        """One full sweep across all sources."""
+        return self._process(self._gather(watchlist=False), dry_run)
+
+    def run_watchlist(self, dry_run: bool = False) -> CycleResult:
+        """A fast, targeted poll of just the watchlist (for catching glitches)."""
+        return self._process(self._gather(watchlist=True), dry_run)

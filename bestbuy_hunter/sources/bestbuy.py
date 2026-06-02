@@ -146,3 +146,15 @@ class BestBuySource(Source):
 
         log.info("Best Buy: %d raw candidates.", len(candidates))
         return candidates
+
+    def scan_watchlist(self) -> list[Deal]:
+        """Just the watched SKUs' open-box offers — cheap enough to poll often."""
+        if not self.cfg.watch_skus:
+            return []
+        candidates: list[Deal] = []
+        try:
+            for result in self.client.open_box(skus=self.cfg.watch_skus):
+                candidates.extend(self._openbox_to_deals(result, "laptops"))
+        except Exception as exc:
+            log.warning("Best Buy watchlist scan failed: %s", exc)
+        return candidates

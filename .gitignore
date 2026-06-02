@@ -4,6 +4,9 @@
 
 # runtime state & caches
 data/
+*.db
+*.db-wal
+*.db-shm
 *.log
 
 # python

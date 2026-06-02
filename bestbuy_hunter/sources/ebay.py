@@ -175,3 +175,21 @@ class EbaySource(Source):
 
         log.info("eBay: %d raw candidates.", len(candidates))
         return candidates
+
+    def scan_watchlist(self) -> list[Deal]:
+        """Search just the user's WATCH_TERMS — cheap enough to poll often."""
+        if not self.cfg.watch_terms:
+            return []
+        candidates: list[Deal] = []
+        for term in self.cfg.watch_terms:
+            try:
+                items = self._search(term, limit=25)
+            except Exception as exc:
+                log.warning("eBay watchlist search failed for %r: %s", term, exc)
+                continue
+            for item in items:
+                # Watchlist is intentionally permissive — keep every condition match.
+                deal = self._to_deal(item, "laptops")
+                if deal:
+                    candidates.append(deal)
+        return candidates

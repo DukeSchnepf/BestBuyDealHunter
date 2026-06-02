@@ -18,9 +18,14 @@ class Source(abc.ABC):
 
     @abc.abstractmethod
     def scan(self) -> list[Deal]:
-        """Run this retailer's queries and return raw (un-curated) candidates.
+        """Run this retailer's full sweep and return raw (un-curated) candidates.
 
         Implementations should never raise on a single failed query — log and
         return whatever was gathered so one flaky retailer can't sink a cycle.
         """
         raise NotImplementedError
+
+    def scan_watchlist(self) -> list[Deal]:
+        """A cheap, targeted scan of just the user's watchlist, run frequently
+        to catch fast-dying price glitches. Default: nothing to watch."""
+        return []

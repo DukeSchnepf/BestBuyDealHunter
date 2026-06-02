@@ -1,0 +1,26 @@
+; systemd unit for the Best Buy Deal Hunter watcher.
+; Install steps are in deploy/AWS_SETUP.md. Quick version:
+;   sudo cp deploy/bestbuy-hunter.service /etc/systemd/system/
+;   sudo systemctl daemon-reload
+;   sudo systemctl enable --now bestbuy-hunter
+;   journalctl -u bestbuy-hunter -f        # watch the logs
+
+[Unit]
+Description=Best Buy Deal Hunter (deal + price-glitch watcher)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/BestBuyDealHunter
+EnvironmentFile=/home/ubuntu/BestBuyDealHunter/.env
+ExecStart=/home/ubuntu/BestBuyDealHunter/.venv/bin/python main.py --watch
+Restart=always
+RestartSec=10
+; harden a little
+NoNewPrivileges=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

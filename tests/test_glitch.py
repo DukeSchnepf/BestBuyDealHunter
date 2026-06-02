@@ -1,7 +1,7 @@
 from bestbuy_hunter import glitch
 from bestbuy_hunter.config import GlitchConfig
 from bestbuy_hunter.models import Deal
-from bestbuy_hunter.pricehistory import PriceStats
+from bestbuy_hunter.storage import PriceStats
 
 
 def cfg(**kw) -> GlitchConfig:
@@ -68,3 +68,25 @@ def test_combined_confidence_higher_than_single():
     v = glitch.assess(deal(150.0, regular=2000.0), stats, cfg())
     assert v.is_glitch
     assert v.confidence > 0.9
+
+
+def test_robust_mad_outlier():
+    # No floor/median/msrp trigger, but price is many MADs below the median.
+    stats = PriceStats(count=10, low=1500.0, median=2000.0, last=1500.0, mad=50.0)
+    v = glitch.assess(deal(1500.0), stats, cfg())
+    assert v.is_glitch
+    assert "MADs below" in v.reason
+
+
+def test_robust_needs_enough_history():
+    stats = PriceStats(count=5, low=1500.0, median=2000.0, last=1500.0, mad=50.0)
+    v = glitch.assess(deal(1500.0), stats, cfg(min_history_robust=8))
+    assert not v.is_glitch
+
+
+def test_rate_of_change_crash():
+    # Not enough history for floor/median, no MSRP — but an 80% single-cycle crash.
+    stats = PriceStats(count=3, low=1000.0, median=1000.0, last=200.0, prev=1000.0)
+    v = glitch.assess(deal(200.0), stats, cfg())
+    assert v.is_glitch
+    assert "crash" in v.reason

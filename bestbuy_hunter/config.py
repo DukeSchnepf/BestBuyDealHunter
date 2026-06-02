@@ -114,6 +114,13 @@ class GlitchConfig:
     msrp_ratio: float = 0.40
     # Minimum recorded history points before floor/median signals are trusted.
     min_history: int = 4
+    # Robust outlier detection: modified z-score (median/MAD based). A price this
+    # many MADs below the median is flagged. Needs more history to be meaningful.
+    mad_z_threshold: float = 3.5
+    min_history_robust: int = 8
+    # Rate-of-change: a single-cycle drop of at least this fraction looks like a
+    # sudden mispricing (0.50 => price halved since the previous observation).
+    drop_ratio: float = 0.50
     # Minimum confidence (0-1) required to fire a glitch alert.
     min_confidence: float = 0.6
 
@@ -127,11 +134,16 @@ class Config:
     discord_glitch_webhook_url: str = ""   # optional separate lane for price errors
     glitch_ping: str = ""                  # e.g. "@here" or "<@&ROLE_ID>" for glitch alerts
     poll_interval_minutes: int = 12
+    watch_interval_minutes: int = 0        # fast watchlist poll; 0 disables
     price_cap: Optional[float] = None
     min_price: float = 15.0
     gpu_min_tier: int = 1
     max_alerts_per_cycle: int = 15
     watch_skus: list[int] = field(default_factory=list)
+    watch_terms: list[str] = field(default_factory=list)
+    # price-history storage retention
+    raw_days: int = 7                      # keep per-cycle samples this long
+    retention_days: int = 90               # keep daily rollups this long
     thresholds: Thresholds = field(default_factory=Thresholds)
     glitch: GlitchConfig = field(default_factory=GlitchConfig)
     # source toggles + credentials
@@ -174,6 +186,9 @@ class Config:
             if chunk.isdigit():
                 watch_skus.append(int(chunk))
 
+        terms_raw = os.getenv("WATCH_TERMS", "").strip()
+        watch_terms = [t.strip() for t in terms_raw.split(",") if t.strip()]
+
         thresholds = Thresholds(
             core=_f("THRESHOLD_CORE", 15.0),
             component=_f("THRESHOLD_COMPONENT", 20.0),
@@ -188,6 +203,9 @@ class Config:
             median_ratio=_f("GLITCH_MEDIAN_RATIO", 0.50),
             msrp_ratio=_f("GLITCH_MSRP_RATIO", 0.40),
             min_history=_i("GLITCH_MIN_HISTORY", 4),
+            mad_z_threshold=_f("GLITCH_MAD_Z", 3.5),
+            min_history_robust=_i("GLITCH_MIN_HISTORY_ROBUST", 8),
+            drop_ratio=_f("GLITCH_DROP_RATIO", 0.50),
             min_confidence=_f("GLITCH_MIN_CONFIDENCE", 0.6),
         )
 
@@ -200,11 +218,15 @@ class Config:
             discord_glitch_webhook_url=os.getenv("DISCORD_GLITCH_WEBHOOK_URL", "").strip(),
             glitch_ping=os.getenv("GLITCH_PING", "").strip(),
             poll_interval_minutes=_i("POLL_INTERVAL_MINUTES", 12),
+            watch_interval_minutes=_i("WATCH_INTERVAL_MINUTES", 0),
             price_cap=_f("PRICE_CAP", None),
             min_price=_f("MIN_PRICE", 15.0),
             gpu_min_tier=_i("GPU_MIN_TIER", 1),
             max_alerts_per_cycle=_i("MAX_ALERTS_PER_CYCLE", 15),
             watch_skus=watch_skus,
+            watch_terms=watch_terms,
+            raw_days=_i("PRICE_RAW_DAYS", 7),
+            retention_days=_i("PRICE_RETENTION_DAYS", 90),
             thresholds=thresholds,
             glitch=glitch,
             bestbuy_enabled=_b("BESTBUY_ENABLED", True),
