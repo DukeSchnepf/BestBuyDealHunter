@@ -46,6 +46,12 @@ TIER_TERMS: dict[int, str] = {
 # Conditions we accept (used + open-box + refurbished tiers), comma-joined for the filter.
 ACCEPTED_CONDITION_IDS = "1500|2000|2010|2020|2030|2500|2750|3000|4000|5000|6000"
 
+# eBay (US) category IDs used to tighten searches and cut false matches.
+BUCKET_CATEGORY_IDS: dict[str, str] = {
+    "laptops": "177",    # PC Laptops & Netbooks
+    "desktops": "179",   # PC Desktops & All-In-Ones
+}
+
 
 class EbaySource(Source):
     name = "ebay"
@@ -73,6 +79,15 @@ class EbaySource(Source):
             data={"grant_type": "client_credentials", "scope": SCOPE},
             timeout=20,
         )
+        if resp.status_code in (400, 401):
+            # Most common new-dev failure: wrong keys, or sandbox keys against the
+            # production endpoint (this code uses production: api.ebay.com).
+            raise RuntimeError(
+                "eBay auth failed (HTTP %s: %s). Check that EBAY_CLIENT_ID / "
+                "EBAY_CLIENT_SECRET are your *production* App ID (Client ID) and "
+                "Cert ID (Client Secret) — not sandbox keys."
+                % (resp.status_code, resp.text[:160])
+            )
         resp.raise_for_status()
         payload = resp.json()
         self._token = payload["access_token"]
@@ -82,7 +97,7 @@ class EbaySource(Source):
     # ------------------------------------------------------------------ #
     # Search + normalization
     # ------------------------------------------------------------------ #
-    def _search(self, query: str, limit: int = 50) -> list[dict]:
+    def _search(self, query: str, limit: int = 50, category_id: str | None = None) -> list[dict]:
         token = self._get_token()
         headers = {
             "Authorization": f"Bearer {token}",
@@ -98,6 +113,8 @@ class EbaySource(Source):
                 "buyingOptions:{FIXED_PRICE}"
             ),
         }
+        if category_id:
+            params["category_ids"] = category_id
         resp = self.session.get(SEARCH_URL, headers=headers, params=params, timeout=25)
         if resp.status_code == 429:
             log.warning("eBay rate-limited on %r; skipping this query.", query)
@@ -163,7 +180,7 @@ class EbaySource(Source):
             for bucket, suffix in (("laptops", "laptop"), ("desktops", "desktop")):
                 query = f"{term} {suffix}"
                 try:
-                    items = self._search(query)
+                    items = self._search(query, category_id=BUCKET_CATEGORY_IDS.get(bucket))
                 except Exception as exc:
                     log.warning("eBay search failed for %r: %s", query, exc)
                     continue
