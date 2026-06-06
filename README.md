@@ -18,7 +18,8 @@ so the best deals land at the top, and a watcher only pings you about **new** on
 - A **fast watchlist poller** can hit just the SKUs/searches you care about every couple of
   minutes (on top of the slower full sweep) so you catch short-lived mistakes in time.
 - **Self-hosted, no third-party services:** SQLite is built into Python — your price history
-  is yours. A `deploy/` kit runs it 24/7 on a tiny AWS box. See [deploy/AWS_SETUP.md](deploy/AWS_SETUP.md).
+  is yours. Run it on your own machine ([deploy/SELF_HOST.md](deploy/SELF_HOST.md)) or 24/7 on
+  a tiny AWS box ([deploy/AWS_SETUP.md](deploy/AWS_SETUP.md)).
 
 ## How it hand-picks (no junk)
 
@@ -151,7 +152,7 @@ bestbuy_hunter/
   watcher.py         continuous loop: slow full sweep + fast watchlist poll
 main.py              CLI (--watch / --once / --dry-run)
 scripts/check_api.py API smoke test (Best Buy + eBay)
-deploy/              systemd unit + AWS setup guide + S3 backup script
+deploy/              self-host guide (Linux/macOS/Windows) + AWS setup + systemd + backups
 tests/               curation, GPU, glitch, storage, eBay tests (no network)
 ```
 
