@@ -93,6 +93,9 @@ class PriceStore:
         self.retention_seconds = retention_days * 86400
         self.conn = sqlite3.connect(str(path))
         self.conn.execute("PRAGMA journal_mode=WAL")
+        # Let concurrent access (e.g. the dashboard reading while the watcher
+        # writes) wait briefly for a lock instead of erroring out.
+        self.conn.execute("PRAGMA busy_timeout=5000")
         self.conn.executescript(_SCHEMA)
         self.conn.commit()
 

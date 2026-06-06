@@ -151,10 +151,25 @@ bestbuy_hunter/
   hunter.py          orchestrator: scan -> history -> curate -> glitch -> dedupe -> notify
   watcher.py         continuous loop: slow full sweep + fast watchlist poll
 main.py              CLI (--watch / --once / --dry-run)
+dashboard.py         optional local web dashboard (Flask) — deals, glitches, on-demand scan
 scripts/check_api.py API smoke test (Best Buy + eBay)
 deploy/              self-host guide (Linux/macOS/Windows) + AWS setup + systemd + backups
+setup.bat / run_*.bat  Windows one-click setup, watcher, and dashboard launchers
 tests/               curation, GPU, glitch, storage, eBay tests (no network)
 ```
+
+## Web dashboard
+
+A lightweight local UI (no cloud, reads your SQLite history read-only):
+
+```bash
+pip install -r requirements-dashboard.txt
+python dashboard.py          # Windows: double-click run_dashboard.bat
+# open http://127.0.0.1:5000
+```
+
+Shows summary stats, your alert history (deals + ⚡ glitches, filterable), and a
+**Run scan now** button for a live dry-run across all retailers (no Discord send).
 
 ### Adding more sources
 

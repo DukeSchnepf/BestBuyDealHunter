@@ -93,6 +93,16 @@ Create `~/Library/LaunchAgents/com.dealhunter.plist`:
 ```
 Then: `launchctl load ~/Library/LaunchAgents/com.dealhunter.plist`
 
+### Windows (easiest — the included .bat files)
+You can skip the manual venv steps above and just use the double-click scripts in
+the project root:
+1. **`setup.bat`** — creates the virtualenv, installs everything, makes `.env`. Run once.
+2. Edit **`.env`** with your keys.
+3. **`run_watcher.bat`** — starts the hunter (leave the window open).
+4. **`run_dashboard.bat`** — opens the web dashboard in your browser.
+
+To keep the watcher running in the background / on boot, use NSSM:
+
 ### Windows (NSSM — run as a service)
 1. Download [NSSM](https://nssm.cc/download), then in an admin prompt:
    ```
@@ -116,7 +126,21 @@ leave it running. Or use Task Scheduler with "At log on" → start the script.)*
 - **Footprint:** tiny — a single Python process and a SQLite file (a few hundred
   MB to ~1 GB long-term). Leave your machine on for it to keep polling.
 
-## 7. Keep your keys safe
+## 7. Web dashboard (optional)
+
+A lightweight local web UI to see recent deals + glitches and run a scan on demand:
+
+```bash
+pip install -r requirements-dashboard.txt
+python dashboard.py          # Windows: double-click run_dashboard.bat
+```
+Then open **http://127.0.0.1:5000**. It shows summary stats, your alert history
+(deals + ⚡ glitches, filterable), and a **“Run scan now”** button that does a live
+dry-run across Best Buy + eBay (no Discord send). It reads the database read-only,
+so it's safe to run at the same time as the watcher. Set `DASHBOARD_PORT` to change
+the port.
+
+## 8. Keep your keys safe
 
 `.env` and `data/` are gitignored — never commit them. If a key leaks, rotate it
 in the provider's portal (Best Buy / eBay / Discord).

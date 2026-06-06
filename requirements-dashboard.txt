@@ -1,0 +1,3 @@
+# Optional: only needed for the local web dashboard (dashboard.py).
+# The core bot/watcher does NOT require this.
+Flask>=3.0
